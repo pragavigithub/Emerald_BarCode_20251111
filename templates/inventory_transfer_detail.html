@@ -330,10 +330,10 @@
                     <div class="mb-3">
                         <label for="item_code" class="form-label">Item Code <span class="text-danger">*</span></label>
                         <div class="input-group">
-                            <input type="text" class="form-control" id="item_code" name="item_code" required>
-                            <button type="button" class="btn btn-outline-primary" onclick="scanItemCode()">
+                            <input type="text" class="form-control" id="item_code" name="item_code" readonly>
+                            <!-- <button type="button" class="btn btn-outline-primary" onclick="scanItemCode()">
                                 <i data-feather="camera"></i> Scan
-                            </button>
+                            </button> -->
                         </div>
                         <div id="item_type_indicator" class="mt-2"></div>
                     </div>
@@ -364,13 +364,13 @@
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label for="quantity" class="form-label">Quantity <span class="text-danger">*</span></label>
-                                <input type="number" class="form-control" id="quantity" name="quantity" step="0.01" required>
+                                <input type="number" class="form-control" id="quantity" name="quantity" step="1" required>
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label for="unit_of_measure" class="form-label">UoM <span class="text-danger">*</span></label>
-                                <input type="text" class="form-control" id="unit_of_measure" name="unit_of_measure" value="EA" required>
+                                <input type="text" class="form-control" id="unit_of_measure" name="unit_of_measure" >
                             </div>
                         </div>
                     </div>
@@ -380,9 +380,9 @@
                                 <label for="from_warehouse_code" class="form-label">From Warehouse <span class="text-danger">*</span></label>
                                 <div class="input-group">
                                     <input type="text" class="form-control" id="from_warehouse_code" name="from_warehouse_code" value="{{ transfer.from_warehouse or '' }}" readonly>
-                                    <button type="button" class="btn btn-outline-primary" onclick="scanWarehouse('from')">
+                                    <!-- <button type="button" class="btn btn-outline-primary" onclick="scanWarehouse('from')">
                                         <i data-feather="camera"></i> Scan
-                                    </button>
+                                    </button> -->
                                 </div>
                             </div>
                         </div>
@@ -391,9 +391,9 @@
                                 <label for="to_warehouse_code" class="form-label">To Warehouse <span class="text-danger">*</span></label>
                                 <div class="input-group">
                                     <input type="text" class="form-control" id="to_warehouse_code" name="to_warehouse_code" value="{{ transfer.to_warehouse or '' }}" readonly>
-                                    <button type="button" class="btn btn-outline-primary" onclick="scanWarehouse('to')">
+                                    <!-- <button type="button" class="btn btn-outline-primary" onclick="scanWarehouse('to')">
                                         <i data-feather="camera"></i> Scan
-                                    </button>
+                                    </button> -->
                                 </div>
                             </div>
                         </div>
@@ -404,9 +404,9 @@
                                 <label for="from_bin" class="form-label">From Bin Location <span class="text-danger">*</span></label>
                                 <div class="input-group">
                                     <input type="text" class="form-control" id="from_bin" name="from_bin" required>
-                                    <button type="button" class="btn btn-outline-primary" onclick="scanBin('from')">
+                                    <!-- <button type="button" class="btn btn-outline-primary" onclick="scanBin('from')">
                                         <i data-feather="camera"></i> Scan
-                                    </button>
+                                    </button> -->
                                 </div>
                             </div>
                         </div>
@@ -415,9 +415,9 @@
                                 <label for="to_bin" class="form-label">To Bin Location <span class="text-danger">*</span></label>
                                 <div class="input-group">
                                     <input type="text" class="form-control" id="to_bin" name="to_bin" required>
-                                    <button type="button" class="btn btn-outline-primary" onclick="scanBin('to')">
+                                    <!-- <button type="button" class="btn btn-outline-primary" onclick="scanBin('to')">
                                         <i data-feather="camera"></i> Scan
-                                    </button>
+                                    </button> -->
                                 </div>
                             </div>
                         </div>
@@ -431,7 +431,7 @@
                             <button type="button" class="btn btn-outline-primary" onclick="loadBatchNumbers()">
                                 <i data-feather="refresh-cw"></i> Refresh
                             </button>
-                            <button type="button" class="btn btn-outline-primary" onclick="loadBatchNumbers()">
+                            <button type="button" class="btn btn-outline-primary" onclick="showQRScannerForTransfer()">
                                 <i data-feather="camera"></i> Scan
                             </button>
                         </div>
