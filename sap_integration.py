@@ -4201,6 +4201,180 @@ class SAPIntegration:
                 'serial_numbers': []
             }
 
+    def get_bin_abs_entry(self, bin_code, warehouse_code):
+        """
+        Get BinAbsEntry for a bin code in a specific warehouse
+        
+        Args:
+            bin_code: The bin code to lookup
+            warehouse_code: The warehouse code
+            
+        Returns:
+            int: BinAbsEntry or None if not found
+        """
+        if not self.ensure_logged_in():
+            return None
+        
+        try:
+            filter_query = f"BinCode eq '{bin_code}' and Warehouse eq '{warehouse_code}'"
+            url = f"{self.base_url}/b1s/v1/BinLocations?$filter={filter_query}&$select=AbsEntry,BinCode"
+            
+            response = self.session.get(url, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                bins = data.get('value', [])
+                
+                if bins:
+                    abs_entry = bins[0].get('AbsEntry')
+                    logging.debug(f"Found BinAbsEntry {abs_entry} for bin {bin_code} in warehouse {warehouse_code}")
+                    return abs_entry
+                else:
+                    logging.warning(f"Bin {bin_code} not found in warehouse {warehouse_code}")
+                    return None
+            else:
+                logging.error(f"Failed to lookup bin: {response.status_code}")
+                return None
+                
+        except Exception as e:
+            logging.error(f"Error looking up bin AbsEntry: {str(e)}")
+            return None
+
+    def create_stock_transfer(self, from_warehouse, to_warehouse, items, comments=''):
+        """
+        Create Stock Transfer in SAP B1
+        
+        Args:
+            from_warehouse: Source warehouse code
+            to_warehouse: Destination warehouse code
+            items: List of dicts with keys: item_code, quantity, from_bin, to_bin, batch_number
+            comments: Optional comments for the transfer
+            
+        Returns:
+            dict with success status, doc_num (if successful), or error message
+        """
+        if not self.ensure_logged_in():
+            return {
+                'success': False,
+                'error': 'SAP B1 connection unavailable'
+            }
+        
+        try:
+            from datetime import datetime
+            
+            stock_transfer_lines = []
+            line_num = 0
+            
+            for item in items:
+                line = {
+                    "LineNum": line_num,
+                    "ItemCode": item['item_code'],
+                    "Quantity": item['quantity'],
+                    "FromWarehouseCode": from_warehouse,
+                    "WarehouseCode": to_warehouse
+                }
+                
+                if item.get('from_bin'):
+                    from_bin_abs_entry = self.get_bin_abs_entry(item['from_bin'], from_warehouse)
+                    
+                    if from_bin_abs_entry is None:
+                        logging.error(f"Could not find BinAbsEntry for from_bin {item['from_bin']}")
+                        return {
+                            'success': False,
+                            'error': f"Bin '{item['from_bin']}' not found in warehouse '{from_warehouse}'"
+                        }
+                    
+                    bin_allocations = [{
+                        "BinAbsEntry": from_bin_abs_entry,
+                        "Quantity": item['quantity'],
+                        "BinActionType": "batFromWarehouse",
+                        "SerialAndBatchNumbersBaseLine": line_num
+                    }]
+                    line["StockTransferLinesBinAllocations"] = bin_allocations
+                
+                if item.get('to_bin'):
+                    to_bin_abs_entry = self.get_bin_abs_entry(item['to_bin'], to_warehouse)
+                    
+                    if to_bin_abs_entry is None:
+                        logging.error(f"Could not find BinAbsEntry for to_bin {item['to_bin']}")
+                        return {
+                            'success': False,
+                            'error': f"Bin '{item['to_bin']}' not found in warehouse '{to_warehouse}'"
+                        }
+                    
+                    if "StockTransferLinesBinAllocations" not in line:
+                        line["StockTransferLinesBinAllocations"] = []
+                    
+                    line["StockTransferLinesBinAllocations"].append({
+                        "BinAbsEntry": to_bin_abs_entry,
+                        "Quantity": item['quantity'],
+                        "BinActionType": "batToWarehouse",
+                        "SerialAndBatchNumbersBaseLine": line_num
+                    })
+                
+                if item.get('batch_number'):
+                    batch_numbers = [{
+                        "BatchNumber": item['batch_number'],
+                        "Quantity": item['quantity']
+                    }]
+                    line["BatchNumbers"] = batch_numbers
+                
+                stock_transfer_lines.append(line)
+                line_num += 1
+            
+            stock_transfer_data = {
+                "DocDate": datetime.now().strftime('%Y-%m-%d'),
+                "DueDate": datetime.now().strftime('%Y-%m-%d'),
+                "Comments": comments,
+                "FromWarehouse": from_warehouse,
+                "ToWarehouse": to_warehouse,
+                "StockTransferLines": stock_transfer_lines
+            }
+            
+            logging.info(f"📤 Posting Stock Transfer to SAP B1: {from_warehouse} → {to_warehouse}")
+            logging.debug(f"Stock Transfer Data: {json.dumps(stock_transfer_data, indent=2)}")
+            
+            url = f"{self.base_url}/b1s/v1/StockTransfers"
+            response = self.session.post(url, json=stock_transfer_data, timeout=30)
+            
+            if response.status_code == 201:
+                result = response.json()
+                doc_num = result.get('DocNum')
+                doc_entry = result.get('DocEntry')
+                
+                logging.info(f"✅ Stock Transfer created successfully: DocNum={doc_num}, DocEntry={doc_entry}")
+                
+                return {
+                    'success': True,
+                    'doc_num': doc_num,
+                    'doc_entry': doc_entry,
+                    'message': f'Stock Transfer {doc_num} created successfully'
+                }
+            else:
+                error_message = response.text
+                try:
+                    error_data = response.json()
+                    error_message = error_data.get('error', {}).get('message', {}).get('value', error_message)
+                except:
+                    pass
+                
+                logging.error(f"❌ SAP B1 Stock Transfer failed: {response.status_code} - {error_message}")
+                
+                return {
+                    'success': False,
+                    'error': f'SAP B1 error ({response.status_code}): {error_message}'
+                }
+                
+        except Exception as e:
+            logging.error(f"❌ Error creating stock transfer: {str(e)}")
+            import traceback
+            logging.error(f"Full traceback: {traceback.format_exc()}")
+            
+            return {
+                'success': False,
+                'error': f'Error creating stock transfer: {str(e)}'
+            }
+
     def logout(self):
         """Logout from SAP B1"""
         if self.session_id:

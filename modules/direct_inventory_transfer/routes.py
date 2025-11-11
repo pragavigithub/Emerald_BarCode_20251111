@@ -541,3 +541,238 @@ def reject_transfer(transfer_id):
         logging.error(f"Error rejecting transfer: {str(e)}")
         db.session.rollback()
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@direct_inventory_transfer_bp.route('/qr-scan', methods=['GET'])
+@login_required
+def qr_scan():
+    """QR Code Scanning page for direct inventory transfer"""
+    if not current_user.has_permission('direct_inventory_transfer'):
+        flash('Access denied - Direct Inventory Transfer permissions required', 'error')
+        return redirect(url_for('dashboard'))
+    
+    return render_template('direct_inventory_transfer.html')
+
+
+@direct_inventory_transfer_bp.route('/api/decode-qr', methods=['POST'])
+@login_required
+def decode_qr():
+    """Decode QR code JSON data"""
+    try:
+        data = request.get_json()
+        qr_data_str = data.get('qr_data', '').strip()
+        
+        if not qr_data_str:
+            return jsonify({'success': False, 'error': 'QR code data is required'}), 400
+        
+        qr_data = json.loads(qr_data_str)
+        
+        required_fields = ['item', 'qty']
+        missing_fields = [field for field in required_fields if field not in qr_data]
+        
+        if missing_fields:
+            return jsonify({
+                'success': False, 
+                'error': f'Missing required fields in QR code: {", ".join(missing_fields)}'
+            }), 400
+        
+        return jsonify({
+            'success': True,
+            'item_code': qr_data.get('item'),
+            'quantity': qr_data.get('qty'),
+            'batch_number': qr_data.get('batch'),
+            'po_number': qr_data.get('po'),
+            'grn_id': qr_data.get('id'),
+            'grn_date': qr_data.get('grn_date'),
+            'exp_date': qr_data.get('exp_date'),
+            'pack': qr_data.get('pack')
+        })
+        
+    except json.JSONDecodeError as e:
+        return jsonify({'success': False, 'error': f'Invalid QR code format: {str(e)}'}), 400
+    except Exception as e:
+        logging.error(f"Error decoding QR code: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@direct_inventory_transfer_bp.route('/api/validate-item-code', methods=['POST'])
+@login_required
+def validate_item_code_api():
+    """Validate item code and return details"""
+    try:
+        data = request.get_json()
+        item_code = data.get('item_code', '').strip()
+        
+        if not item_code:
+            return jsonify({'success': False, 'error': 'Item code is required'}), 400
+        
+        sap = SAPIntegration()
+        validation_result = sap.validate_item_code(item_code)
+        
+        if not validation_result.get('success'):
+            return jsonify({
+                'success': False,
+                'error': validation_result.get('error', 'Item validation failed')
+            }), 404
+        
+        item_description = ''
+        try:
+            if sap.ensure_logged_in():
+                url = f"{sap.base_url}/b1s/v1/Items('{item_code}')"
+                response = sap.session.get(url, timeout=10)
+                if response.status_code == 200:
+                    item_data = response.json()
+                    item_description = item_data.get('ItemName', '')
+        except Exception as e:
+            logging.warning(f"Could not fetch item description: {str(e)}")
+        
+        item_type = 'none'
+        if validation_result.get('batch_required'):
+            item_type = 'batch'
+        elif validation_result.get('serial_required'):
+            item_type = 'serial'
+        
+        return jsonify({
+            'success': True,
+            'item_code': item_code,
+            'item_description': item_description,
+            'item_type': item_type,
+            'batch_required': validation_result.get('batch_required', False),
+            'serial_required': validation_result.get('serial_required', False),
+            'manage_method': validation_result.get('manage_method', 'N')
+        })
+        
+    except Exception as e:
+        logging.error(f"Error validating item code: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@direct_inventory_transfer_bp.route('/api/submit-direct', methods=['POST'])
+@login_required
+def submit_direct_transfer():
+    """Submit direct inventory transfer to SAP B1 immediately"""
+    try:
+        data = request.get_json()
+        
+        required_fields = ['from_warehouse', 'to_warehouse', 'item_code', 'quantity']
+        missing_fields = [field for field in required_fields if not data.get(field)]
+        
+        if missing_fields:
+            return jsonify({
+                'success': False,
+                'error': f'Missing required fields: {", ".join(missing_fields)}'
+            }), 400
+        
+        transfer_number = f"DIT/{datetime.now().strftime('%Y%m%d')}/{DirectInventoryTransfer.query.count() + 1:010d}"
+        
+        transfer = DirectInventoryTransfer(
+            transfer_number=transfer_number,
+            user_id=current_user.id,
+            from_warehouse=data.get('from_warehouse'),
+            to_warehouse=data.get('to_warehouse'),
+            from_bin=data.get('from_bin'),
+            to_bin=data.get('to_bin'),
+            notes=data.get('notes'),
+            status='draft'
+        )
+        
+        db.session.add(transfer)
+        db.session.flush()
+        
+        transfer_item = DirectInventoryTransferItem(
+            direct_inventory_transfer_id=transfer.id,
+            item_code=data.get('item_code'),
+            item_description=data.get('item_description'),
+            quantity=float(data.get('quantity')),
+            item_type=data.get('item_type'),
+            from_warehouse_code=data.get('from_warehouse'),
+            to_warehouse_code=data.get('to_warehouse'),
+            from_bin_code=data.get('from_bin'),
+            to_bin_code=data.get('to_bin'),
+            batch_number=data.get('batch_number'),
+            validation_status='validated'
+        )
+        
+        db.session.add(transfer_item)
+        db.session.commit()
+        
+        sap = SAPIntegration()
+        sap_result = sap.create_stock_transfer(
+            from_warehouse=data.get('from_warehouse'),
+            to_warehouse=data.get('to_warehouse'),
+            items=[{
+                'item_code': data.get('item_code'),
+                'quantity': float(data.get('quantity')),
+                'from_bin': data.get('from_bin'),
+                'to_bin': data.get('to_bin'),
+                'batch_number': data.get('batch_number'),
+                'item_description': data.get('item_description')
+            }],
+            comments=data.get('notes', f'Direct Transfer {transfer_number}')
+        )
+        
+        if sap_result.get('success'):
+            transfer.sap_document_number = str(sap_result.get('doc_num'))
+            transfer.status = 'posted'
+            db.session.commit()
+            
+            logging.info(f"✅ Direct transfer posted to SAP: {sap_result.get('doc_num')}")
+            
+            return jsonify({
+                'success': True,
+                'transfer_number': transfer_number,
+                'sap_doc_number': sap_result.get('doc_num'),
+                'message': 'Transfer posted successfully to SAP B1'
+            })
+        else:
+            transfer.status = 'rejected'
+            transfer.notes = f"SAP Error: {sap_result.get('error')}"
+            db.session.commit()
+            
+            return jsonify({
+                'success': False,
+                'error': sap_result.get('error', 'Failed to post to SAP B1')
+            }), 500
+        
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error submitting direct transfer: {str(e)}")
+        import traceback
+        logging.error(f"Full traceback: {traceback.format_exc()}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@direct_inventory_transfer_bp.route('/api/history', methods=['GET'])
+@login_required
+def get_transfer_history():
+    """Get recent direct inventory transfers for current user"""
+    try:
+        transfers = DirectInventoryTransfer.query.filter_by(
+            user_id=current_user.id
+        ).order_by(
+            DirectInventoryTransfer.created_at.desc()
+        ).limit(20).all()
+        
+        transfer_list = []
+        for transfer in transfers:
+            item = transfer.items[0] if transfer.items else None
+            
+            transfer_list.append({
+                'transfer_number': transfer.transfer_number,
+                'item_code': item.item_code if item else 'N/A',
+                'quantity': item.quantity if item else 0,
+                'from_warehouse': transfer.from_warehouse,
+                'to_warehouse': transfer.to_warehouse,
+                'status': transfer.status,
+                'sap_document_number': transfer.sap_document_number,
+                'created_at': transfer.created_at.isoformat() if transfer.created_at else None
+            })
+        
+        return jsonify({
+            'success': True,
+            'transfers': transfer_list
+        })
+        
+    except Exception as e:
+        logging.error(f"Error fetching transfer history: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
