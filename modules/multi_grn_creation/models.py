@@ -12,6 +12,8 @@ class MultiGRNBatch(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     batch_number = db.Column(db.String(50), unique=True, nullable=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    series_id = db.Column(db.Integer, nullable=True)
+    series_name = db.Column(db.String(100), nullable=True)
     customer_code = db.Column(db.String(50), nullable=False)
     customer_name = db.Column(db.String(200), nullable=False)
     status = db.Column(db.String(20), default='draft', nullable=False)

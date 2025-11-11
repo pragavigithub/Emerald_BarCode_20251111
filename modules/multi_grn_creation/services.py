@@ -391,3 +391,128 @@ class SAPMultiGRNService:
         return {
 
         }
+    
+    def fetch_po_series(self):
+        """
+        Fetch PO Series (Document Series) from SAP B1 using SQL Query
+        URL: /b1s/v1/SQLQueries('Get_PO_Series')/List
+        """
+        if not self.ensure_logged_in():
+            logging.warning("⚠️ SAP login failed - cannot fetch PO series")
+            return {'success': False, 'error': 'SAP login failed'}
+        
+        try:
+            url = f"{self.base_url}/b1s/v1/SQLQueries('Get_PO_Series')/List"
+            
+            logging.info("🔍 Fetching PO Series from SAP")
+            response = self.session.post(url, json={}, timeout=30)
+            
+            if response.status_code == 200:
+                data = response.json()
+                series_list = data.get('value', [])
+                logging.info(f"✅ Fetched {len(series_list)} PO series")
+                return {'success': True, 'series': series_list}
+            elif response.status_code == 401:
+                self.session_id = None
+                if self.login():
+                    return self.fetch_po_series()
+                return {'success': False, 'error': 'Authentication failed'}
+            else:
+                error_msg = response.text
+                logging.error(f"❌ Failed to fetch PO series: {error_msg}")
+                return {'success': False, 'error': error_msg}
+                
+        except Exception as e:
+            logging.error(f"❌ Error fetching PO series: {str(e)}")
+            return {'success': False, 'error': str(e)}
+    
+    def fetch_cardcode_by_series(self, series_id):
+        """
+        Fetch CardCode by Series ID from SAP B1 using SQL Query
+        URL: /b1s/v1/SQLQueries('Get_CarCode_BySeriesID')/List
+        """
+        if not self.ensure_logged_in():
+            logging.warning(f"⚠️ SAP login failed - cannot fetch CardCode for series {series_id}")
+            return {'success': False, 'error': 'SAP login failed'}
+        
+        try:
+            url = f"{self.base_url}/b1s/v1/SQLQueries('Get_CarCode_BySeriesID')/List"
+            payload = {
+                "ParamList": f"SeriesID='{series_id}'"
+            }
+            
+            logging.info(f"🔍 Fetching CardCodes for series: {series_id}")
+            response = self.session.post(url, json=payload, timeout=30)
+            
+            if response.status_code == 200:
+                data = response.json()
+                cardcodes = data.get('value', [])
+                logging.info(f"✅ Fetched {len(cardcodes)} CardCodes for series {series_id}")
+                return {'success': True, 'cardcodes': cardcodes}
+            elif response.status_code == 401:
+                self.session_id = None
+                if self.login():
+                    return self.fetch_cardcode_by_series(series_id)
+                return {'success': False, 'error': 'Authentication failed'}
+            else:
+                error_msg = response.text
+                logging.error(f"❌ Failed to fetch CardCodes for series {series_id}: {error_msg}")
+                return {'success': False, 'error': error_msg}
+                
+        except Exception as e:
+            logging.error(f"❌ Error fetching CardCodes for series {series_id}: {str(e)}")
+            return {'success': False, 'error': str(e)}
+    
+    def fetch_purchase_orders_by_series_and_card(self, series_id, card_code):
+        """
+        Fetch open Purchase Orders filtered by Series and CardCode
+        Returns only POs with DocumentStatus = 'bost_Open' and open line items
+        URL: /b1s/v1/PurchaseOrders?$filter=CardCode eq 'X' and DocumentStatus eq 'bost_Open' and Series eq Y
+        """
+        if not self.ensure_logged_in():
+            logging.warning(f"⚠️ SAP login failed - cannot fetch POs for series {series_id} and card {card_code}")
+            return {'success': False, 'error': 'SAP login failed'}
+        
+        try:
+            url = f"{self.base_url}/b1s/v1/PurchaseOrders"
+            params = {
+                '$filter': f"CardCode eq '{card_code}' and DocumentStatus eq 'bost_Open' and Series eq {series_id}",
+                '$select': 'DocEntry,DocNum,CardCode,CardName,DocDate,DocDueDate,DocTotal,DocumentStatus,Series,DocumentLines'
+            }
+            
+            logging.info(f"🔍 Fetching open POs for Series: {series_id}, CardCode: {card_code}")
+            logging.info(f"  SAP URL: {url}?$filter={params['$filter']}")
+            response = self.session.get(url, params=params, timeout=30)
+            
+            if response.status_code == 200:
+                data = response.json()
+                pos = data.get('value', [])
+                open_pos = []
+                
+                for po in pos:
+                    document_lines = po.get('DocumentLines', [])
+                    open_lines = [
+                        line for line in document_lines
+                        if line.get('LineStatus') == 'bost_Open' and line.get('Quantity', 0) > 0
+                    ]
+                    
+                    if open_lines:
+                        po['OpenLines'] = open_lines
+                        po['TotalOpenLines'] = len(open_lines)
+                        open_pos.append(po)
+                
+                logging.info(f"✅ Fetched {len(open_pos)} open POs for series {series_id} and card {card_code}")
+                return {'success': True, 'purchase_orders': open_pos}
+            elif response.status_code == 401:
+                self.session_id = None
+                if self.login():
+                    return self.fetch_purchase_orders_by_series_and_card(series_id, card_code)
+                return {'success': False, 'error': 'Authentication failed'}
+            else:
+                error_msg = response.text
+                logging.error(f"❌ Failed to fetch POs: {error_msg}")
+                return {'success': False, 'error': error_msg}
+                
+        except Exception as e:
+            logging.error(f"❌ Error fetching POs for series {series_id} and card {card_code}: {str(e)}")
+            return {'success': False, 'error': str(e)}

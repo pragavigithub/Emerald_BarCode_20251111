@@ -122,17 +122,19 @@ def delete_batch(batch_id):
 @multi_grn_bp.route('/create/step1', methods=['GET', 'POST'])
 @login_required
 def create_step1_customer():
-    """Step 1: Select Customer"""
+    """Step 1: Select Document Series and Customer"""
     if not current_user.has_permission('multiple_grn'):
         flash('Access denied', 'error')
         return redirect(url_for('dashboard'))
     
     if request.method == 'POST':
+        series_id = request.form.get('series_id')
+        series_name = request.form.get('series_name')
         customer_code = request.form.get('customer_code')
         customer_name = request.form.get('customer_name')
         
         if not customer_code or not customer_name:
-            flash('Please select a customer', 'error')
+            flash('Please select document series and customer', 'error')
             return redirect(url_for('multi_grn.create_step1_customer'))
         
         from datetime import datetime
@@ -141,6 +143,8 @@ def create_step1_customer():
         batch = MultiGRNBatch(
             user_id=current_user.id,
             batch_number=batch_number,
+            series_id=int(series_id) if series_id else None,
+            series_name=series_name,
             customer_code=customer_code,
             customer_name=customer_name,
             status='draft'
@@ -148,7 +152,7 @@ def create_step1_customer():
         db.session.add(batch)
         db.session.commit()
         
-        logging.info(f"✅ Created GRN batch {batch.batch_number} for customer {customer_name}")
+        logging.info(f"✅ Created GRN batch {batch.batch_number} for series {series_name}, customer {customer_name}")
         return redirect(url_for('multi_grn.create_step2_select_pos', batch_id=batch.id))
     
     return render_template('multi_grn/step1_customer.html')
@@ -193,7 +197,15 @@ def create_step2_select_pos(batch_id):
         return redirect(url_for('multi_grn.create_step3_select_lines', batch_id=batch_id))
     
     sap_service = SAPMultiGRNService()
-    result = sap_service.fetch_open_purchase_orders_by_name(batch.customer_name)
+    
+    # Use series-based filtering if series_id is available
+    if batch.series_id:
+        result = sap_service.fetch_purchase_orders_by_series_and_card(batch.series_id, batch.customer_code)
+        logging.info(f"📊 Fetching POs with Series filter: Series={batch.series_id}, CardCode={batch.customer_code}")
+    else:
+        # Fallback to legacy method without series filtering
+        result = sap_service.fetch_open_purchase_orders_by_name(batch.customer_name)
+        logging.info(f"📊 Fetching POs without Series filter: CardName={batch.customer_name}")
     
     if not result['success']:
         flash(f"Error fetching Purchase Orders: {result.get('error')}", 'error')
@@ -482,6 +494,48 @@ def api_customers_dropdown():
     
     customers = result.get('customers', [])
     return jsonify({'success': True, 'customers': customers})
+
+@multi_grn_bp.route('/api/po-series')
+@login_required
+def api_po_series():
+    """API endpoint to fetch PO document series"""
+    sap_service = SAPMultiGRNService()
+    result = sap_service.fetch_po_series()
+    
+    if not result['success']:
+        return jsonify({'success': False, 'error': result.get('error')}), 500
+    
+    return jsonify({'success': True, 'series': result.get('series', [])})
+
+@multi_grn_bp.route('/api/cardcode-by-series/<series_id>')
+@login_required
+def api_cardcode_by_series(series_id):
+    """API endpoint to fetch CardCodes filtered by Series ID"""
+    sap_service = SAPMultiGRNService()
+    result = sap_service.fetch_cardcode_by_series(series_id)
+    
+    if not result['success']:
+        return jsonify({'success': False, 'error': result.get('error')}), 500
+    
+    return jsonify({'success': True, 'cardcodes': result.get('cardcodes', [])})
+
+@multi_grn_bp.route('/api/pos-by-series-and-card')
+@login_required
+def api_pos_by_series_and_card():
+    """API endpoint to fetch POs filtered by Series and CardCode"""
+    series_id = request.args.get('series_id')
+    card_code = request.args.get('card_code')
+    
+    if not series_id or not card_code:
+        return jsonify({'success': False, 'error': 'series_id and card_code are required'}), 400
+    
+    sap_service = SAPMultiGRNService()
+    result = sap_service.fetch_purchase_orders_by_series_and_card(series_id, card_code)
+    
+    if not result['success']:
+        return jsonify({'success': False, 'error': result.get('error')}), 500
+    
+    return jsonify({'success': True, 'purchase_orders': result.get('purchase_orders', [])})
 
 @multi_grn_bp.route('/api/generate-barcode', methods=['POST'])
 @login_required
