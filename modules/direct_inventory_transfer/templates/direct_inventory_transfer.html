@@ -24,15 +24,36 @@
                         <div class="card bg-light">
                             <div class="card-body">
                                 <label class="form-label fw-bold">QR Code Scanner</label>
-                                <div class="input-group mb-2">
-                                    <span class="input-group-text"><i class="bi bi-upc-scan"></i></span>
-                                    <input type="text" class="form-control" id="qrCodeInput" 
-                                           placeholder="Scan or paste QR code data here..." autofocus>
-                                    <button type="button" class="btn btn-primary" id="decodeQrBtn">
-                                        <i class="bi bi-check-circle"></i> Decode
-                                    </button>
+                                <div class="row">
+                                    <div class="col-md-8">
+                                        <div class="input-group mb-2">
+                                            <span class="input-group-text"><i class="bi bi-upc-scan"></i></span>
+                                            <input type="text" class="form-control" id="qrCodeInput" 
+                                                   placeholder="Scan or paste QR code data here..." autofocus>
+                                            <button type="button" class="btn btn-primary" id="decodeQrBtn">
+                                                <i class="bi bi-check-circle"></i> Decode
+                                            </button>
+                                        </div>
+                                        <small class="text-muted">Scan the QR code label or paste the QR code data to auto-fill the form</small>
+                                    </div>
+                                    <div class="col-md-4 text-center">
+                                        <button type="button" class="btn btn-success btn-lg" id="startCameraBtn">
+                                            <i class="bi bi-camera"></i> Start Camera
+                                        </button>
+                                        <br><small class="text-muted">Use camera to scan</small>
+                                    </div>
                                 </div>
-                                <small class="text-muted">Scan the QR code label or paste the QR code data to auto-fill the form</small>
+                                
+                                <!-- Camera Scanner Container (hidden by default) -->
+                                <div id="cameraScannerContainer" style="display: none; margin-top: 15px;">
+                                    <div class="text-center">
+                                        <video id="qrScannerVideo" style="width: 100%; max-width: 640px; border: 2px solid #007bff; border-radius: 8px;"></video>
+                                        <br>
+                                        <button type="button" class="btn btn-danger mt-2" id="stopCameraBtn">
+                                            <i class="bi bi-stop-circle"></i> Stop Camera
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -187,6 +208,37 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load warehouses on page load
     loadWarehouses();
     loadTransferHistory();
+
+    // Camera Scanner Functionality
+    document.getElementById('startCameraBtn').addEventListener('click', function() {
+        const container = document.getElementById('cameraScannerContainer');
+        const video = document.getElementById('qrScannerVideo');
+        
+        container.style.display = 'block';
+        this.style.display = 'none';
+        
+        // Start the barcode scanner
+        startBarcodeScanner('qrScannerVideo', function(scannedCode) {
+            console.log('QR Code scanned:', scannedCode);
+            
+            // Put scanned code in the input field
+            document.getElementById('qrCodeInput').value = scannedCode;
+            
+            // Stop the camera
+            stopBarcodeScanner();
+            container.style.display = 'none';
+            document.getElementById('startCameraBtn').style.display = 'block';
+            
+            // Auto-decode the QR code
+            document.getElementById('decodeQrBtn').click();
+        });
+    });
+
+    document.getElementById('stopCameraBtn').addEventListener('click', function() {
+        stopBarcodeScanner();
+        document.getElementById('cameraScannerContainer').style.display = 'none';
+        document.getElementById('startCameraBtn').style.display = 'block';
+    });
 
     // QR Code Decode Button
     document.getElementById('decodeQrBtn').addEventListener('click', function() {
