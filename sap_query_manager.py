@@ -111,6 +111,11 @@ class SAPQueryManager:
                 "SqlCode": "GetBinCodeByWHCode",
                 "SqlName": "GetBinCodeByWHCode",
                 "SqlText": "SELECT ob.AbsEntry AS BinAbsEntry, ob.BinCode, ob.Disabled AS IsActive FROM OBIN ob WHERE ob.WhsCode = :whsCode AND ob.Disabled = 'N' ORDER BY ob.BinCode"
+            },
+            {
+                "SqlCode": "Get_CarCode_BySeriesID",
+                "SqlName": "Get_CarCode_BySeriesID",
+                "SqlText": "SELECT DISTINCT T0.[CardCode] AS ['Card_Code'], T0.[CardName] AS ['Card Name'] FROM OPOR T0 INNER JOIN NNM1 T1 ON T0.Series = T1.Series WHERE T0.DocStatus = 'O' AND T0.Series = :SeriesID ORDER BY T0.[CardName]"
             }
         ]
     
